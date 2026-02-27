@@ -1,0 +1,10 @@
+{
+  "name": "ubc-transfer-handler",
+  "version": "1.0.0",
+  "description": "Fail-safe transfer logic for UBC Youth Camp",
+  "main": "src/main.js",
+  "type": "module",
+  "dependencies": {
+    "node-appwrite": "^14.0.0"
+  }
+}
