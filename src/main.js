@@ -42,57 +42,82 @@ export default async (context) => {
       }
     }
 
-    // --- ACTION: TRANSFER ---
+// --- ACTION: TRANSFER ---
     if (action === 'transfer') {
       const transferVal = parseFloat(amount);
+      const TARGET_FEE = 4000;
       
       // 1. Fetch both parties
       const sender = await databases.getDocument(dbId, campColl, senderId);
       const receiver = await databases.getDocument(dbId, campColl, receiverId);
 
-      // 2. Security & Business Rules
+      // 2. Security: Sender must maintain at least 4,000 for their own fee
       const senderBalance = parseFloat(sender.amount_paid || 0);
-      if (senderBalance - transferVal < 4000) {
+      if (senderBalance - transferVal < TARGET_FEE) {
         return context.res.json({ 
           success: false, 
-          message: 'Insufficient surplus. You must keep ₦4,000 for your camp fee.' 
+          message: `Transfer failed. You must keep ₦${TARGET_FEE} for your own camp fee.` 
         });
       }
 
-      // 3. ATOMIC-LIKE UPDATES
-      // Subtract from Sender
+      // 3. Update Sender (Subtract)
       await databases.updateDocument(dbId, campColl, senderId, {
         amount_paid: senderBalance - transferVal
       });
 
-      // Add to Receiver
-      await databases.updateDocument(dbId, campColl, receiverId, {
-        amount_paid: (parseFloat(receiver.amount_paid) || 0) + transferVal
-      });
+      // 4. Update Receiver & Check for Activation
+      const receiverNewBalance = (parseFloat(receiver.amount_paid) || 0) + transferVal;
+      
+      let receiverPayload = {
+        amount_paid: receiverNewBalance,
+        status: receiverNewBalance >= TARGET_FEE ? 'paid' : 'pending'
+      };
 
-      // 4. LOG HISTORY (Optional Fail-soft)
-      try {
-        await databases.createDocument(dbId, payColl, ID.unique(), {
-          camperId: senderId,
-          amount: -transferVal,
-          reference: `SENT TO ${receiver.name.split(' ')[0]}`.toUpperCase()
-        });
-        await databases.createDocument(dbId, payColl, ID.unique(), {
-          camperId: receiverId,
-          amount: transferVal,
-          reference: `FROM ${sender.name.split(' ')[0]}`.toUpperCase()
-        });
-      } catch (logErr) {
-        context.error("History logged failed, but transfer succeeded.");
+      // --- LOGISTICS AUTO-ASSIGNMENT ---
+      // Triggered if they just hit 4k and don't have a team yet
+      if (receiverNewBalance >= TARGET_FEE && !receiver.team) {
+        const TEAMS = ["OPAJOBI", "ABIMBOLA", "ABIOLA", "UBC"];
+        const BUSES = ["1", "2", "3", "4", "5"];
+
+        // Get distribution counts
+        const globalPaid = await databases.listDocuments(dbId, campColl, [
+            Query.notEqual("team", ""),
+            Query.limit(1)
+        ]);
+        
+        const genderPaid = await databases.listDocuments(dbId, campColl, [
+            Query.equal("gender", receiver.gender),
+            Query.notEqual("bed_no", ""),
+            Query.limit(1)
+        ]);
+
+        receiverPayload.team = TEAMS[globalPaid.total % TEAMS.length];
+        receiverPayload.bus_no = BUSES[globalPaid.total % BUSES.length];
+        
+        const prefix = (receiver.gender === "Male" || receiver.gender === "M") ? "M" : "F";
+        receiverPayload.bed_no = `${prefix}-${(genderPaid.total + 1).toString().padStart(3, '0')}`;
       }
 
-      return context.res.json({ success: true, message: 'Transfer successful' });
+      // Execute Receiver Update
+      await databases.updateDocument(dbId, campColl, receiverId, receiverPayload);
+
+      // 5. LOG HISTORY
+      await databases.createDocument(dbId, payColl, ID.unique(), {
+        camperId: senderId,
+        amount: (-transferVal),
+        reference: `SENT TO ${receiver.name.split(' ')[0]}`.toUpperCase(),
+        date: new Date().toISOString()
+      });
+
+      await databases.createDocument(dbId, payColl, ID.unique(), {
+        camperId: receiverId,
+        amount: transferVal,
+        reference: `FROM ${sender.name.split(' ')[0]}`.toUpperCase(),
+        date: new Date().toISOString()
+      });
+
+      return context.res.json({ 
+        success: true, 
+        message: 'Transfer successful! Receiver logistics updated.' 
+      });
     }
-
-    return context.res.json({ success: false, message: 'Unknown action' });
-
-  } catch (err) {
-    context.error(err.message);
-    return context.res.json({ success: false, message: err.message });
-  }
-};
