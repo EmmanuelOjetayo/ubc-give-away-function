@@ -25,6 +25,12 @@ export default async (context) => {
   try {
     // --- ACTION: RESOLVE NAME ---
     if (action === 'resolve') {
+      if (senderId && senderId === receiverId) {
+      return context.res.json({ 
+        success: false, 
+        message: 'Illegal Operation: You cannot giveaway funds to yourself.' 
+      });
+    }
       try {
         const user = await databases.getDocument(dbId, campColl, receiverId);
         return context.res.json({ success: true, name: user.name });
@@ -41,6 +47,12 @@ export default async (context) => {
 
     // --- ACTION: TRANSFER ---
     if (action === 'transfer') {
+      if (senderId === receiverId) {
+        return context.res.json({ 
+          success: false, 
+          message: "Illegal Operation: You cannot send funds to your own account ID." 
+        });
+      }
       const transferVal = parseFloat(amount || 0);
       const TARGET_FEE = 4000;
       
