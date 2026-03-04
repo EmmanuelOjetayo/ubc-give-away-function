@@ -54,7 +54,7 @@ export default async (context) => {
         });
       }
       const transferVal = parseFloat(amount || 0);
-      const TARGET_FEE = 4000;
+      const TARGET_FEE = 5000;
       
       // 1. Fetch both parties
       const sender = await databases.getDocument(dbId, campColl, senderId);
